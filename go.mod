@@ -1,3 +1,3 @@
-module github.com/kakuyomu-loader
+module github.com/syriku/kakuyomu-loader
 
 go 1.25
