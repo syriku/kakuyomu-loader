@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Novel represents a parsed novel chapter.
@@ -34,6 +35,61 @@ func NewKakuyomuLoader() KakuyomuLoader {
 	}
 }
 
+// HtmlReader defines the interface for parsing HTML content into a Novel.
+type HtmlReader interface {
+	Novel() (*Novel, error)
+}
+
+// defaultHtmlReader is the default implementation of HtmlReader.
+type defaultHtmlReader struct {
+	html  string
+	once  sync.Once
+	novel *Novel
+	err   error
+}
+
+// NewHtmlReader creates a new instance of HtmlReader.
+func NewHtmlReader(html string) HtmlReader {
+	return &defaultHtmlReader{
+		html: html,
+	}
+}
+
+// Novel returns the parsed Novel, performing parsing lazily on the first call.
+func (r *defaultHtmlReader) Novel() (*Novel, error) {
+	r.once.Do(func() {
+		// Parse title
+		titleRe := regexp.MustCompile(`(?is)<p class="widget-episodeTitle[^>]*>(.*?)</p>`)
+		titleMatch := titleRe.FindStringSubmatch(r.html)
+		title := ""
+		if len(titleMatch) > 1 {
+			title = cleanParagraph(titleMatch[1])
+		}
+
+		// Parse content paragraphs
+		pRe := regexp.MustCompile(`(?is)<p\s+id="p\d+"[^>]*>(.*?)</p>`)
+		pMatches := pRe.FindAllStringSubmatch(r.html, -1)
+
+		var paragraphs []string
+		vocabulary := make(map[string]string)
+		for _, m := range pMatches {
+			extractVocabulary(m[1], vocabulary)
+			cleaned := cleanParagraph(m[1])
+			paragraphs = append(paragraphs, cleaned)
+		}
+
+		content := strings.Join(paragraphs, "\n")
+
+		r.novel = &Novel{
+			Title:      title,
+			Content:    content,
+			Vocabulary: vocabulary,
+		}
+	})
+
+	return r.novel, r.err
+}
+
 // Load fetches and parses the novel content from the given URL.
 func (l *DefaultKakuyomuLoader) Load(ctx context.Context, url string) (*Novel, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -57,35 +113,8 @@ func (l *DefaultKakuyomuLoader) Load(ctx context.Context, url string) (*Novel, e
 		return nil, fmt.Errorf("failed to read body: %w", err)
 	}
 
-	bodyStr := string(bodyBytes)
-
-	// Parse title
-	titleRe := regexp.MustCompile(`(?is)<p class="widget-episodeTitle[^>]*>(.*?)</p>`)
-	titleMatch := titleRe.FindStringSubmatch(bodyStr)
-	title := ""
-	if len(titleMatch) > 1 {
-		title = cleanParagraph(titleMatch[1])
-	}
-
-	// Parse content paragraphs
-	pRe := regexp.MustCompile(`(?is)<p\s+id="p\d+"[^>]*>(.*?)</p>`)
-	pMatches := pRe.FindAllStringSubmatch(bodyStr, -1)
-
-	var paragraphs []string
-	vocabulary := make(map[string]string)
-	for _, m := range pMatches {
-		extractVocabulary(m[1], vocabulary)
-		cleaned := cleanParagraph(m[1])
-		paragraphs = append(paragraphs, cleaned)
-	}
-
-	content := strings.Join(paragraphs, "\n")
-
-	return &Novel{
-		Title:      title,
-		Content:    content,
-		Vocabulary: vocabulary,
-	}, nil
+	reader := NewHtmlReader(string(bodyBytes))
+	return reader.Novel()
 }
 
 func cleanParagraph(s string) string {
