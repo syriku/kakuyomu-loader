@@ -43,8 +43,8 @@ func TestHtmlReader(t *testing.T) {
 `
 	reader := NewHtmlReader(sampleHTML)
 
-	// Call Novel() first time
-	novel, err := reader.Novel()
+	// Call KakuyomuNovel() first time
+	novel, err := reader.KakuyomuNovel()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -64,8 +64,8 @@ func TestHtmlReader(t *testing.T) {
 		t.Errorf("expected pronunciation 'しのざき つばさ', got '%s'", pron)
 	}
 
-	// Call Novel() second time to test lazy loading (returning same instance)
-	novel2, err := reader.Novel()
+	// Call KakuyomuNovel() second time to test lazy loading (returning same instance)
+	novel2, err := reader.KakuyomuNovel()
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestHtmlReader_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			n, err := reader.Novel()
+			n, err := reader.KakuyomuNovel()
 			novels[idx] = n
 			errors[idx] = err
 		}(i)
@@ -104,5 +104,44 @@ func TestHtmlReader_Concurrency(t *testing.T) {
 		if novels[i] != novels[0] {
 			t.Errorf("goroutine %d returned different novel pointer: %p vs %p", i, novels[i], novels[0])
 		}
+	}
+}
+
+func TestAnyHtmlNovel(t *testing.T) {
+	sampleHTML := `
+<html>
+<head><title>Any HTML Test</title></head>
+<body>
+<div>
+<div class="WorkIntroductionBox_catch__HOBdr">
+	<div class="EyeCatch_catchphrase__tT_m2">サークルの姫を家に泊めたところ、目が覚めたら二人揃って全裸だった。</div>
+</div>
+</div>
+<div class="Gap_size-m__thYv4 Gap_direction-y__Ee6Qv">
+	<div class="CollapseTextWithKakuyomuLinks_collapseText__XSlmz">「世界で一番先輩が嫌いです」<br/>「私も世界で一番嫌いだから」</div>
+	<p>Also with <ruby>篠崎翼<rt>しのざき つばさ</rt></ruby></p>
+</div>
+</body>
+</html>`
+	reader := NewHtmlReader(sampleHTML)
+
+	novel, err := reader.AnyHtmlNovel()
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if novel.Title != "Any HTML Test" {
+		t.Errorf("expected 'Any HTML Test', got '%s'", novel.Title)
+	}
+
+	expectedContent := "Any HTML Test\nサークルの姫を家に泊めたところ、目が覚めたら二人揃って全裸だった。\n「世界で一番先輩が嫌いです」\n「私も世界で一番嫌いだから」\nAlso with 篠崎翼"
+	if novel.Content != expectedContent {
+		t.Errorf("expected content %q, got %q", expectedContent, novel.Content)
+	}
+
+	if pron, ok := novel.Vocabulary["篠崎翼"]; !ok {
+		t.Error("expected vocabulary to contain '篠崎翼'")
+	} else if pron != "しのざき つばさ" {
+		t.Errorf("expected pronunciation 'しのざき つばさ', got '%s'", pron)
 	}
 }
